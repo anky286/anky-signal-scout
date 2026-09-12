@@ -1,3 +1,6 @@
 streamlit
 openai
 pydantic
+requests
+beautifulsoup4
+python-dateutil
