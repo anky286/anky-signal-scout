@@ -38,3 +38,8 @@ st.subheader("Your search")
 
 st.write(f"**Time window:** {time_window}")
 st.write(f"**Content pillars:** {', '.join(content_pillars)}")
+if st.button("Find content opportunities", type="primary"):
+    if not content_pillars:
+        st.warning("Please select at least one content pillar.")
+    else:
+        st.success("Ready to search for content opportunities!")
