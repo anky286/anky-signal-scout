@@ -45,19 +45,46 @@ if st.button("Find content opportunities", type="primary"):
     if not content_pillars:
         st.warning("Please select at least one content pillar.")
     else:
-        with st.spinner("Contacting the AI..."):
+        with st.spinner("Searching for recent technology developments..."):
             try:
+                research_prompt = f"""
+                Search the web for three meaningful technology developments
+                from {time_window.lower()}.
+
+                Focus on:
+                {", ".join(content_pillars)}
+
+                For each development, provide:
+
+                1. Topic
+                2. What happened
+                3. Why it matters
+                4. What most people are saying
+                5. A critical question people may be overlooking
+                6. A possible LinkedIn angle for Anita
+                7. Supporting sources
+
+                Prefer primary and authoritative sources.
+                Include exact dates.
+                Do not invent popularity or traction data.
+                Avoid generic AI predictions.
+                """
+
                 response = client.responses.create(
-                    model="gpt-5-mini",
-                    input=(
-                        "In one short sentence, confirm that you are ready "
-                        "to research these technology topics: "
-                        f"{', '.join(content_pillars)}."
-                    )
+                    model="gpt-4.1-mini",
+                    tools=[
+                        {
+                            "type": "web_search",
+                            "search_context_size": "low"
+                        }
+                    ],
+                    tool_choice="required",
+                    input=research_prompt
                 )
 
-                st.success("OpenAI connection successful!")
-                st.write(response.output_text)
+                st.success("Research complete!")
+                st.subheader("Content opportunities")
+                st.markdown(response.output_text)
 
             except Exception as error:
-                st.error(f"Connection failed: {error}")
+                st.error(f"Search failed: {error}")
