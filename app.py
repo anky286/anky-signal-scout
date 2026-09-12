@@ -42,7 +42,87 @@ def parse_publication_datetime(value):
 
     except (ValueError, TypeError):
         return None
+def extract_publication_datetime_from_url(url):
+    if not url or not url.startswith(("https://", "http://")):
+        return None
 
+    try:
+        response = requests.get(
+            url,
+            timeout=10,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 AnkySignalScout/1.0"
+                )
+            }
+        )
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        metadata_fields = [
+            ("property", "article:published_time"),
+            ("property", "og:published_time"),
+            ("name", "date"),
+            ("name", "pub_date"),
+            ("name", "publish-date"),
+            ("name", "parsely-pub-date"),
+            ("name", "sailthru.date"),
+            ("itemprop", "datePublished")
+        ]
+
+        possible_dates = []
+
+        for attribute, value in metadata_fields:
+            tag = soup.find(
+                "meta",
+                attrs={attribute: value}
+            )
+
+            if tag and tag.get("content"):
+                possible_dates.append(tag["content"])
+
+        for script in soup.find_all(
+            "script",
+            attrs={"type": "application/ld+json"}
+        ):
+            try:
+                data = json.loads(script.string or "{}")
+
+                items = data if isinstance(data, list) else [data]
+
+                for item in items:
+                    if isinstance(item, dict):
+                        published_date = item.get(
+                            "datePublished"
+                        )
+
+                        if published_date:
+                            possible_dates.append(
+                                published_date
+                            )
+
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        for possible_date in possible_dates:
+            try:
+                parsed_date = date_parser.parse(
+                    possible_date
+                )
+
+                if parsed_date.tzinfo is not None:
+                    return parsed_date.astimezone(
+                        timezone.utc
+                    )
+
+            except (ValueError, TypeError, OverflowError):
+                continue
+
+        return None
+
+    except requests.RequestException:
+        return None
 
 st.set_page_config(
     page_title="Anky Signal Scout",
