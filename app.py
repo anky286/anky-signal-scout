@@ -287,12 +287,19 @@ Rules:
                 valid_candidates = []
                 rejected_candidates = []
 
-                for candidate in candidates:
+                               for candidate in candidates:
                     publication_time = (
-                        parse_publication_datetime(
-                            candidate.publication_datetime
+                        extract_publication_datetime_from_url(
+                            candidate.source_url
                         )
                     )
+
+                    if publication_time is not None:
+                        candidate.publication_datetime = (
+                            publication_time.isoformat()
+                        )
+                    else:
+                        candidate.publication_datetime = ""
 
                     if (
                         publication_time is not None
@@ -302,6 +309,7 @@ Rules:
                     ):
                         valid_candidates.append(candidate)
                     else:
+                        rejected_candidates.append(candidate)
                         rejected_candidates.append(candidate)
 
                 if not valid_candidates:
