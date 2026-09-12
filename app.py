@@ -284,34 +284,34 @@ Rules:
                     extraction_response.output_parsed.candidates
                 )
 
-                valid_candidates = []
-                rejected_candidates = []
+                            valid_candidates = []
+                            rejected_candidates = []
 
-                    for candidate in candidates:
-                    publication_time = (
-                        extract_publication_datetime_from_url(
-                            candidate.source_url
-                        )
-                    )
-
-                    if publication_time is not None:
-                        candidate.publication_datetime = (
-                            publication_time.isoformat()
-                        )
-                    else:
-                        candidate.publication_datetime = ""
-
-                    if (
-                        publication_time is not None
-                        and cutoff_time
-                        <= publication_time
-                        <= current_time
-                    ):
-                        valid_candidates.append(candidate)
-                    else:
-                        rejected_candidates.append(candidate)
-                        rejected_candidates.append(candidate)
-
+                            for candidate in candidates:
+                            publication_time = (
+                                extract_publication_datetime_from_url(
+                                    candidate.source_url
+                                )
+                            )
+        
+                            if publication_time is not None:
+                                candidate.publication_datetime = (
+                                    publication_time.isoformat()
+                                )
+                            else:
+                                candidate.publication_datetime = ""
+        
+                            if (
+                                publication_time is not None
+                                and cutoff_time
+                                <= publication_time
+                                <= current_time
+                            ):
+                                valid_candidates.append(candidate)
+                            else:
+                                rejected_candidates.append(candidate)
+                                rejected_candidates.append(candidate)
+        
                 if not valid_candidates:
                     st.warning(
                         "No verifiably recent developments were "
