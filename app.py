@@ -1,11 +1,9 @@
-import streamlit as st
-
 import json
 import requests
+import streamlit as st
 
 from bs4 import BeautifulSoup
 from dateutil import parser as date_parser
-
 from datetime import datetime, timedelta, timezone
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -27,21 +25,6 @@ class CandidateList(BaseModel):
     candidates: list[Candidate]
 
 
-def parse_publication_datetime(value):
-    if not value:
-        return None
-
-    try:
-        cleaned_value = value.strip().replace("Z", "+00:00")
-        parsed_date = datetime.fromisoformat(cleaned_value)
-
-        if parsed_date.tzinfo is None:
-            return None
-
-        return parsed_date.astimezone(timezone.utc)
-
-    except (ValueError, TypeError):
-        return None
 def extract_publication_datetime_from_url(url):
     if not url or not url.startswith(("https://", "http://")):
         return None
@@ -51,9 +34,7 @@ def extract_publication_datetime_from_url(url):
             url,
             timeout=10,
             headers={
-                "User-Agent": (
-                    "Mozilla/5.0 AnkySignalScout/1.0"
-                )
+                "User-Agent": "Mozilla/5.0 AnkySignalScout/1.0"
             }
         )
         response.raise_for_status()
@@ -88,33 +69,24 @@ def extract_publication_datetime_from_url(url):
         ):
             try:
                 data = json.loads(script.string or "{}")
-
                 items = data if isinstance(data, list) else [data]
 
                 for item in items:
                     if isinstance(item, dict):
-                        published_date = item.get(
-                            "datePublished"
-                        )
+                        published_date = item.get("datePublished")
 
                         if published_date:
-                            possible_dates.append(
-                                published_date
-                            )
+                            possible_dates.append(published_date)
 
             except (json.JSONDecodeError, TypeError):
                 continue
 
         for possible_date in possible_dates:
             try:
-                parsed_date = date_parser.parse(
-                    possible_date
-                )
+                parsed_date = date_parser.parse(possible_date)
 
                 if parsed_date.tzinfo is not None:
-                    return parsed_date.astimezone(
-                        timezone.utc
-                    )
+                    return parsed_date.astimezone(timezone.utc)
 
             except (ValueError, TypeError, OverflowError):
                 continue
@@ -123,6 +95,7 @@ def extract_publication_datetime_from_url(url):
 
     except requests.RequestException:
         return None
+
 
 st.set_page_config(
     page_title="Anky Signal Scout",
@@ -289,28 +262,28 @@ Rules:
 
                 for candidate in candidates:
                     publication_time = (
-                                extract_publication_datetime_from_url(
-                                    candidate.source_url
-                                )
-                            )
-        
-                            if publication_time is not None:
-                                candidate.publication_datetime = (
-                                    publication_time.isoformat()
-                                )
-                            else:
-                                candidate.publication_datetime = ""
-        
-                            if (
-                                publication_time is not None
-                                and cutoff_time
-                                <= publication_time
-                                <= current_time
-                            ):
-                                valid_candidates.append(candidate)
-                            else:
-                                rejected_candidates.append(candidate)
-        
+                        extract_publication_datetime_from_url(
+                            candidate.source_url
+                        )
+                    )
+
+                    if publication_time is not None:
+                        candidate.publication_datetime = (
+                            publication_time.isoformat()
+                        )
+                    else:
+                        candidate.publication_datetime = ""
+
+                    if (
+                        publication_time is not None
+                        and cutoff_time
+                        <= publication_time
+                        <= current_time
+                    ):
+                        valid_candidates.append(candidate)
+                    else:
+                        rejected_candidates.append(candidate)
+
                 if not valid_candidates:
                     st.warning(
                         "No verifiably recent developments were "
