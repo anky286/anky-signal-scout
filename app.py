@@ -1,5 +1,11 @@
 import streamlit as st
 
+import json
+import requests
+
+from bs4 import BeautifulSoup
+from dateutil import parser as date_parser
+
 from datetime import datetime, timedelta, timezone
 from openai import OpenAI
 from pydantic import BaseModel, Field
