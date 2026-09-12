@@ -140,24 +140,24 @@ Important:
 
 
 
-                consulted_sources = []
+                       consulted_sources = []
 
-for item in discovery.output:
-    if getattr(item, "type", None) == "web_search_call":
-        action = getattr(item, "action", None)
+        for item in discovery.output:
+            if getattr(item, "type", None) == "web_search_call":
+                action = getattr(item, "action", None)
 
-        for source in getattr(action, "sources", []) or []:
-            url = getattr(source, "url", None)
+                for source in getattr(action, "sources", []) or []:
+                    url = getattr(source, "url", None)
 
-            if url and url not in consulted_sources:
-                consulted_sources.append(url)
+                    if url and url not in consulted_sources:
+                        consulted_sources.append(url)
 
-with st.expander("Websites consulted"):
-    if consulted_sources:
-        for url in consulted_sources:
-            st.markdown(f"- {url}")
-    else:
-        st.write("No source metadata was returned.")
+        with st.expander("Websites consulted"):
+            if consulted_sources:
+                for url in consulted_sources:
+                    st.markdown(f"- {url}")
+            else:
+                st.write("No source metadata was returned.")
 
                 extraction_response = client.responses.parse(
                     model="gpt-5-mini",
