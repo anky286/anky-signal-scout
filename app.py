@@ -287,7 +287,7 @@ Rules:
                 valid_candidates = []
                 rejected_candidates = []
 
-                               for candidate in candidates:
+                    for candidate in candidates:
                     publication_time = (
                         extract_publication_datetime_from_url(
                             candidate.source_url
