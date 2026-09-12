@@ -284,8 +284,8 @@ Rules:
                     extraction_response.output_parsed.candidates
                 )
 
-                            valid_candidates = []
-                            rejected_candidates = []
+                valid_candidates = []
+                rejected_candidates = []
 
                 for candidate in candidates:
                     publication_time = (
