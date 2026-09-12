@@ -16,4 +16,25 @@ time_window = st.sidebar.selectbox(
     ["Last 24 hours", "Last 7 days", "Last 30 days"]
 )
 
-st.write(f"Searching for trends from: **{time_window}**")
+content_pillars = st.sidebar.multiselect(
+    "Which topics should I explore?",
+    [
+        "Enterprise AI",
+        "AI Agents",
+        "Product Management",
+        "Enterprise Transformation",
+        "Cloud & Infrastructure",
+        "Cybersecurity",
+        "E-commerce"
+    ],
+    default=[
+        "Enterprise AI",
+        "AI Agents",
+        "Enterprise Transformation"
+    ]
+)
+
+st.subheader("Your search")
+
+st.write(f"**Time window:** {time_window}")
+st.write(f"**Content pillars:** {', '.join(content_pillars)}")
