@@ -83,7 +83,9 @@ if st.button("Find content opportunities", type="primary"):
         st.warning("Please select at least one content pillar.")
 
     else:
-        with st.spinner("Searching and validating recent developments..."):
+        with st.spinner(
+            "Searching and validating recent developments..."
+        ):
             try:
                 window_hours = {
                     "Last 24 hours": 24,
@@ -92,7 +94,9 @@ if st.button("Find content opportunities", type="primary"):
                 }[time_window]
 
                 current_time = datetime.now(timezone.utc)
-                cutoff_time = current_time - timedelta(hours=window_hours)
+                cutoff_time = current_time - timedelta(
+                    hours=window_hours
+                )
 
                 discovery_prompt = f"""
 Search the web for up to ten recent technology developments.
@@ -135,29 +139,33 @@ Important:
                         }
                     ],
                     tool_choice="required",
+                    include=[
+                        "web_search_call.action.sources"
+                    ],
                     input=discovery_prompt
                 )
 
+                consulted_sources = []
 
+                for item in research_response.output:
+                    if (
+                        getattr(item, "type", None)
+                        == "web_search_call"
+                    ):
+                        action = getattr(item, "action", None)
+                        sources = (
+                            getattr(action, "sources", [])
+                            or []
+                        )
 
-                       consulted_sources = []
+                        for source in sources:
+                            url = getattr(source, "url", None)
 
-        for item in discovery.output:
-            if getattr(item, "type", None) == "web_search_call":
-                action = getattr(item, "action", None)
-
-                for source in getattr(action, "sources", []) or []:
-                    url = getattr(source, "url", None)
-
-                    if url and url not in consulted_sources:
-                        consulted_sources.append(url)
-
-        with st.expander("Websites consulted"):
-            if consulted_sources:
-                for url in consulted_sources:
-                    st.markdown(f"- {url}")
-            else:
-                st.write("No source metadata was returned.")
+                            if (
+                                url
+                                and url not in consulted_sources
+                            ):
+                                consulted_sources.append(url)
 
                 extraction_response = client.responses.parse(
                     model="gpt-5-mini",
@@ -165,7 +173,8 @@ Important:
                         {
                             "role": "system",
                             "content": """
-Extract every candidate from the research into the required structure.
+Extract every candidate from the research into the required
+structure.
 
 Rules:
 
@@ -185,19 +194,25 @@ Rules:
                     text_format=CandidateList
                 )
 
-                candidates = extraction_response.output_parsed.candidates
+                candidates = (
+                    extraction_response.output_parsed.candidates
+                )
 
                 valid_candidates = []
                 rejected_candidates = []
 
                 for candidate in candidates:
-                    publication_time = parse_publication_datetime(
-                        candidate.publication_datetime
+                    publication_time = (
+                        parse_publication_datetime(
+                            candidate.publication_datetime
+                        )
                     )
 
                     if (
                         publication_time is not None
-                        and cutoff_time <= publication_time <= current_time
+                        and cutoff_time
+                        <= publication_time
+                        <= current_time
                     ):
                         valid_candidates.append(candidate)
                     else:
@@ -205,18 +220,20 @@ Rules:
 
                 if not valid_candidates:
                     st.warning(
-                        "No verifiably recent developments were found "
-                        "within this time window."
+                        "No verifiably recent developments were "
+                        "found within this time window."
                     )
 
                 else:
+                    opportunity_word = (
+                        "opportunity"
+                        if len(valid_candidates) == 1
+                        else "opportunities"
+                    )
+
                     st.success(
                         f"{len(valid_candidates)} valid content "
-                        f"opportunity found."
-                        if len(valid_candidates) == 1
-                        else
-                        f"{len(valid_candidates)} valid content "
-                        f"opportunities found."
+                        f"{opportunity_word} found."
                     )
 
                     st.subheader("Content opportunities")
@@ -226,7 +243,8 @@ Rules:
                         st.subheader(candidate.topic)
 
                         st.caption(
-                            f"Published: {candidate.publication_datetime}"
+                            "Published: "
+                            f"{candidate.publication_datetime}"
                         )
 
                         st.markdown("**What happened**")
@@ -238,30 +256,46 @@ Rules:
                         st.markdown("**Overlooked tension**")
                         st.write(candidate.overlooked_tension)
 
-                        st.markdown("**Possible LinkedIn angle**")
+                        st.markdown(
+                            "**Possible LinkedIn angle**"
+                        )
                         st.write(candidate.linkedin_angle)
 
                         st.markdown(
-                            f"**Source:** [{candidate.source_url}]"
+                            f"**Source:** "
+                            f"[{candidate.source_url}]"
                             f"({candidate.source_url})"
+                        )
+
+                with st.expander("Websites consulted"):
+                    if consulted_sources:
+                        for url in consulted_sources:
+                            st.markdown(f"- {url}")
+                    else:
+                        st.write(
+                            "No source metadata was returned."
                         )
 
                 with st.expander("Validation details"):
                     st.write(
-                        f"Candidates discovered: {len(candidates)}"
+                        "Candidates discovered: "
+                        f"{len(candidates)}"
                     )
                     st.write(
-                        f"Candidates accepted: {len(valid_candidates)}"
+                        "Candidates accepted: "
+                        f"{len(valid_candidates)}"
                     )
                     st.write(
-                        f"Candidates rejected: {len(rejected_candidates)}"
+                        "Candidates rejected: "
+                        f"{len(rejected_candidates)}"
                     )
 
                     if rejected_candidates:
                         st.write(
-                            "Rejected because the publication date was "
-                            "missing, invalid, in the future or outside "
-                            "the selected time window:"
+                            "Rejected because the publication "
+                            "date was missing, invalid, in the "
+                            "future or outside the selected time "
+                            "window:"
                         )
 
                         for candidate in rejected_candidates:
@@ -270,9 +304,17 @@ Rules:
                                 or "Unverified"
                             )
 
-                            st.write(
-                                f"- {candidate.topic} — {displayed_date}"
-                            )
+                            if candidate.source_url:
+                                st.markdown(
+                                    f"- [{candidate.topic}]"
+                                    f"({candidate.source_url}) "
+                                    f"— {displayed_date}"
+                                )
+                            else:
+                                st.write(
+                                    f"- {candidate.topic} "
+                                    f"— {displayed_date}"
+                                )
 
             except Exception as error:
                 st.error(f"Search failed: {error}")
