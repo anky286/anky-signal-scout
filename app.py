@@ -1,4 +1,7 @@
 import streamlit as st
+from datetime import datetime, timedelta, timezone
+
+
 from openai import OpenAI
 
 st.set_page_config(
@@ -47,28 +50,70 @@ if st.button("Find content opportunities", type="primary"):
     else:
         with st.spinner("Searching for recent technology developments..."):
             try:
-                research_prompt = f"""
-                Search the web for three meaningful technology developments
-                from {time_window.lower()}.
+                window_hours = {
+    "Last 24 hours": 24,
+    "Last 7 days": 168,
+    "Last 30 days": 720
+}[time_window]
 
-                Focus on:
-                {", ".join(content_pillars)}
+current_time = datetime.now(timezone.utc)
+cutoff_time = current_time - timedelta(hours=window_hours)
+               research_prompt = f"""
+You are a rigorous technology research analyst.
 
-                For each development, provide:
+Current UTC time:
+{current_time.isoformat()}
 
-                1. Topic
-                2. What happened
-                3. Why it matters
-                4. What most people are saying
-                5. A critical question people may be overlooking
-                6. A possible LinkedIn angle for Anita
-                7. Supporting sources
+Cutoff time:
+{cutoff_time.isoformat()}
 
-                Prefer primary and authoritative sources.
-                Include exact dates.
-                Do not invent popularity or traction data.
-                Avoid generic AI predictions.
-                """
+Find up to three meaningful technology developments published
+or officially announced between the cutoff time and current time.
+
+Focus on:
+{", ".join(content_pillars)}
+
+STRICT RULES:
+
+- Do not include anything older than the cutoff time.
+- Check both the event date and the source publication date.
+- Never use an old announcement merely to fill the requested number.
+- If only one qualifying development exists, return only one.
+- Prefer an official primary source plus one independent source.
+- If only one source exists, label the topic "single-source".
+- Do not claim what analysts, experts or most people think without
+  evidence from multiple sources.
+- Separate company claims from independently verified facts.
+- Do not invent LinkedIn traction.
+- Avoid generic privacy, security and job-loss questions unless the
+  evidence makes them specifically relevant.
+- Avoid promotional phrases such as "exploring the future" and
+  "harnessing the power".
+
+For each valid development, provide:
+
+1. Topic
+2. Exact event date
+3. Exact source publication date
+4. What happened
+5. Why it matters for enterprises
+6. What the company claims
+7. What independent evidence supports or challenges the claim
+8. What remains uncertain
+9. A specific overlooked tension or consequence
+10. A sharp LinkedIn angle for Anita
+11. Supporting sources
+
+Anita's positioning is:
+Enterprise AI × Product × Transformation.
+
+Her angle should question the popular narrative and connect the
+development to implementation, governance, product design, data
+quality, ownership, adoption or measurable business value.
+
+If no qualifying developments exist, say:
+"No sufficiently strong developments found within this time window."
+"""
 
                 response = client.responses.create(
                     model="gpt-4.1-mini",
