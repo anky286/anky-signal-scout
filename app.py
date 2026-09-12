@@ -51,14 +51,15 @@ if st.button("Find content opportunities", type="primary"):
         with st.spinner("Searching for recent technology developments..."):
             try:
                 window_hours = {
-    "Last 24 hours": 24,
-    "Last 7 days": 168,
-    "Last 30 days": 720
-}[time_window]
+                    "Last 24 hours": 24,
+                    "Last 7 days": 168,
+                    "Last 30 days": 720
+                }[time_window]
 
-current_time = datetime.now(timezone.utc)
-cutoff_time = current_time - timedelta(hours=window_hours)
-               research_prompt = f"""
+                current_time = datetime.now(timezone.utc)
+                cutoff_time = current_time - timedelta(hours=window_hours)
+
+                research_prompt = f"""
 You are a rigorous technology research analyst.
 
 Current UTC time:
@@ -93,26 +94,15 @@ STRICT RULES:
 For each valid development, provide:
 
 1. Topic
-2. Exact event date
-3. Exact source publication date
-4. What happened
-5. Why it matters for enterprises
-6. What the company claims
-7. What independent evidence supports or challenges the claim
-8. What remains uncertain
-9. A specific overlooked tension or consequence
-10. A sharp LinkedIn angle for Anita
-11. Supporting sources
+2. What happened
+3. Why it matters
+4. What most people are saying, only when supported by evidence
+5. A specific overlooked question or tension
+6. A critical LinkedIn angle for Anita
+7. Supporting sources
 
-Anita's positioning is:
-Enterprise AI × Product × Transformation.
-
-Her angle should question the popular narrative and connect the
-development to implementation, governance, product design, data
-quality, ownership, adoption or measurable business value.
-
-If no qualifying developments exist, say:
-"No sufficiently strong developments found within this time window."
+If no valid developments exist, say:
+"No meaningful developments found within this time window."
 """
 
                 response = client.responses.create(
