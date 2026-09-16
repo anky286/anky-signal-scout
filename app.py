@@ -13,7 +13,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 
-APP_VERSION = 8
+APP_VERSION = 9
 
 SOURCE_TYPE = Literal[
     "Official announcement",
@@ -51,7 +51,7 @@ class CandidateVerification(BaseModel):
         "Company-reported",
         "Single-source claim",
         "Opinion",
-        "Unmatched",
+        "RSS-only lead",
     ]
     source_type: SOURCE_TYPE
     evidence_title: str
@@ -174,9 +174,18 @@ def harden_verification(item, verification, cutoff_time, current_time):
         problems.append("the evidence publication date is outside the window")
 
     if problems:
-        verification.verification_status = "Unmatched"
+        verification.verification_status = "RSS-only lead"
+        verification.source_type = "Unclear"
+        verification.evidence_title = ""
+        verification.evidence_publisher = ""
+        verification.evidence_publication_date = ""
+        verification.verified_facts = (
+            item["rss_summary"] or item["title"]
+        )
+        verification.primary_source_url = ""
         verification.verification_note = (
-            "Rejected by Python because " + "; ".join(problems) + "."
+            "Use as a research lead only. Direct-source matching was not "
+            "established because " + "; ".join(problems) + "."
         )
         verification.supporting_sources = []
         return verification
@@ -239,6 +248,16 @@ def harden_verification(item, verification, cutoff_time, current_time):
         )
 
     return verification
+
+
+def confidence_label(verification_status):
+    return {
+        "Verified": "High confidence",
+        "Company-reported": "Medium confidence",
+        "Single-source claim": "Use with caution",
+        "Opinion": "Commentary",
+        "RSS-only lead": "Research lead only",
+    }[verification_status]
 
 
 def fetch_recent_rss_items(pillars, time_window, cutoff_time, current_time):
@@ -347,6 +366,10 @@ content_pillars = st.sidebar.multiselect(
 st.subheader("Your search")
 st.write(f"**Time window:** {time_window}")
 st.write(f"**Content pillars:** {', '.join(content_pillars)}")
+st.caption(
+    "Source verification is shown as a confidence label. RSS-only stories "
+    "remain visible as research leads instead of being blocked."
+)
 
 if st.button("Find content opportunities", type="primary"):
     if not content_pillars:
@@ -424,8 +447,8 @@ Use these status definitions:
   available sources are too weak to establish it confidently.
 - Opinion: the RSS item is primarily commentary and does not report a
   discrete new development.
-- Unmatched: the exact RSS article could not be located. A thematically
-  related article is not a match.
+- RSS-only lead: the exact publisher article could not be located. Preserve
+  the RSS item as a research lead, but do not substitute a related article.
 
 For each candidate, report:
 
@@ -470,7 +493,7 @@ Extract the verification results into the required structure.
 - Do not replace the RSS candidate with a related story.
 - Copy evidence headlines, publishers, and dates exactly from the
   research.
-- If the exact RSS article was not found, label it Unmatched and leave
+- If the exact RSS article was not found, label it RSS-only lead and leave
   its evidence fields empty.
 """,
                             },
@@ -515,7 +538,7 @@ Extract the verification results into the required structure.
                             )
 
                     analysis_items = []
-                    excluded_items = []
+                    rss_only_items = []
 
                     for item in rss_items:
                         verification = verifications_by_id.get(
@@ -523,35 +546,38 @@ Extract the verification results into the required structure.
                         )
 
                         if verification is None:
-                            excluded_items.append(
-                                (
-                                    item,
-                                    "Unmatched",
-                                    "No verification result was returned.",
-                                )
+                            verification = CandidateVerification(
+                                candidate_id=item["candidate_id"],
+                                verification_status="RSS-only lead",
+                                source_type="Unclear",
+                                evidence_title="",
+                                evidence_publisher="",
+                                evidence_publication_date="",
+                                verified_facts=(
+                                    item["rss_summary"] or item["title"]
+                                ),
+                                verification_note=(
+                                    "Use as a research lead only. No source "
+                                    "verification result was returned."
+                                ),
+                                primary_source_url="",
+                                supporting_sources=[],
                             )
-                            continue
 
-                        if verification.verification_status in {
-                            "Verified",
-                            "Company-reported",
-                        }:
-                            enriched_item = item.copy()
-                            enriched_item["verification"] = verification
-                            analysis_items.append(enriched_item)
-                        else:
-                            excluded_items.append(
-                                (
-                                    item,
-                                    verification.verification_status,
-                                    verification.verification_note,
-                                )
-                            )
+                        if (
+                            verification.verification_status
+                            == "RSS-only lead"
+                        ):
+                            rss_only_items.append(item)
+
+                        enriched_item = item.copy()
+                        enriched_item["verification"] = verification
+                        analysis_items.append(enriched_item)
 
                     if not analysis_items:
                         st.warning(
-                            "Recent RSS items were found, but none passed "
-                            "the source-verification gate."
+                            "Recent RSS items were found, but their source "
+                            "identity could not be established."
                         )
                     else:
                         analysis_model_input = []
@@ -604,14 +630,21 @@ Extract the verification results into the required structure.
 You are the analysis stage of Anky Signal Scout.
 
 Select up to five of the strongest supplied candidates for a
-critical LinkedIn post or article. Use only the verified facts
-supplied for each candidate.
+critical LinkedIn post or article. Use only the supplied facts and
+respect each candidate's verification status.
 
 For each selected candidate:
 - Preserve its candidate_id exactly.
 - Summarise what happened without adding unsupported details.
 - If the status is Company-reported, clearly attribute performance
   or outcome claims to the company.
+- If the status is Single-source claim, clearly state that the story
+  currently relies on one source and avoid treating uncertain details
+  as established fact.
+- If the status is Opinion, describe it as a commentary lead rather
+  than as a newly verified development.
+- If the status is RSS-only lead, use only the RSS title and summary,
+  state that it needs direct-source checking, and do not add details.
 - Explain why it matters to enterprises.
 - Identify a story-specific conflict, trade-off, or unanswered
   question supported by the available evidence.
@@ -659,7 +692,7 @@ For each selected candidate:
                             )
                         else:
                             st.success(
-                                f"{len(valid_opportunities)} verified "
+                                f"{len(valid_opportunities)} recent "
                                 "content opportunities found."
                             )
                             st.subheader("Content opportunities")
@@ -677,6 +710,8 @@ For each selected candidate:
                                     f"{source_item['publication_datetime']} | "
                                     "Verification: "
                                     f"{verification.verification_status} | "
+                                    "Confidence: "
+                                    f"{confidence_label(verification.verification_status)} | "
                                     "Source type: "
                                     f"{verification.source_type}"
                                 )
@@ -724,28 +759,17 @@ For each selected candidate:
                                             f"{source.publication_date}"
                                         )
 
-                    if excluded_items:
-                        with st.expander(
-                            "Excluded during source verification"
-                        ):
-                            for item, status, note in excluded_items:
-                                st.markdown(
-                                    f"- [{item['title']}]"
-                                    f"({item['source_url']}) â€” "
-                                    f"**{status}** â€” {note}"
-                                )
-
                 with st.expander("Validation details"):
                     st.write(
                         f"RSS items accepted by Python: {len(rss_items)}"
                     )
                     st.write(
-                        "Items passed by source verification: "
+                        "Items available for analysis: "
                         f"{len(analysis_items) if rss_items else 0}"
                     )
                     st.write(
-                        "Items excluded by source verification: "
-                        f"{len(excluded_items) if rss_items else 0}"
+                        "RSS-only leads requiring manual source checking: "
+                        f"{len(rss_only_items) if rss_items else 0}"
                     )
                     st.write(
                         "Window start: "
