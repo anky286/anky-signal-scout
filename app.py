@@ -1,106 +1,98 @@
+import calendar
 import json
-import requests
-import streamlit as st
-
-from bs4 import BeautifulSoup
-from dateutil import parser as date_parser
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote_plus
+
+import feedparser
+import streamlit as st
+from bs4 import BeautifulSoup
 from openai import OpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
-class Candidate(BaseModel):
-    topic: str
-    publication_datetime: str = Field(
-        description="Publication date and time in ISO 8601 format"
-    )
-    source_url: str
+class ContentOpportunity(BaseModel):
+    candidate_id: int
     summary: str
     why_it_matters: str
     overlooked_tension: str
     linkedin_angle: str
 
 
-class CandidateList(BaseModel):
-    candidates: list[Candidate]
+class OpportunityList(BaseModel):
+    opportunities: list[ContentOpportunity]
 
 
-def extract_publication_datetime_from_url(url):
-    if not url or not url.startswith(("https://", "http://")):
-        return None
+def fetch_recent_rss_items(pillars, time_window, cutoff_time, current_time):
+    when_token = {
+        "Last 24 hours": "1d",
+        "Last 7 days": "7d",
+        "Last 30 days": "30d",
+    }[time_window]
 
-    try:
-        response = requests.get(
-            url,
-            timeout=10,
-            headers={
-                "User-Agent": "Mozilla/5.0 AnkySignalScout/1.0"
-            }
+    collected_items = []
+    seen_titles = set()
+
+    for pillar in pillars:
+        query = quote_plus(f'"{pillar}" technology when:{when_token}')
+        feed_url = (
+            "https://news.google.com/rss/search"
+            f"?q={query}&hl=en-US&gl=US&ceid=US:en"
         )
-        response.raise_for_status()
+        feed = feedparser.parse(feed_url)
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        for entry in feed.entries[:15]:
+            published_struct = entry.get("published_parsed")
+            if not published_struct:
+                continue
 
-        metadata_fields = [
-            ("property", "article:published_time"),
-            ("property", "og:published_time"),
-            ("name", "date"),
-            ("name", "pub_date"),
-            ("name", "publish-date"),
-            ("name", "parsely-pub-date"),
-            ("name", "sailthru.date"),
-            ("itemprop", "datePublished")
-        ]
-
-        possible_dates = []
-
-        for attribute, value in metadata_fields:
-            tag = soup.find(
-                "meta",
-                attrs={attribute: value}
+            published_time = datetime.fromtimestamp(
+                calendar.timegm(published_struct),
+                tz=timezone.utc,
             )
 
-            if tag and tag.get("content"):
-                possible_dates.append(tag["content"])
-
-        for script in soup.find_all(
-            "script",
-            attrs={"type": "application/ld+json"}
-        ):
-            try:
-                data = json.loads(script.string or "{}")
-                items = data if isinstance(data, list) else [data]
-
-                for item in items:
-                    if isinstance(item, dict):
-                        published_date = item.get("datePublished")
-
-                        if published_date:
-                            possible_dates.append(published_date)
-
-            except (json.JSONDecodeError, TypeError):
+            if not cutoff_time <= published_time <= current_time:
                 continue
 
-        for possible_date in possible_dates:
-            try:
-                parsed_date = date_parser.parse(possible_date)
-
-                if parsed_date.tzinfo is not None:
-                    return parsed_date.astimezone(timezone.utc)
-
-            except (ValueError, TypeError, OverflowError):
+            title = entry.get("title", "Untitled").strip()
+            title_key = title.casefold()
+            if title_key in seen_titles:
                 continue
 
-        return None
+            source = entry.get("source", {})
+            source_name = source.get("title", "Unknown source")
+            summary_html = entry.get("summary", "")
+            summary = BeautifulSoup(
+                summary_html, "html.parser"
+            ).get_text(" ", strip=True)
 
-    except requests.RequestException:
-        return None
+            seen_titles.add(title_key)
+            collected_items.append(
+                {
+                    "title": title,
+                    "publication_datetime": published_time.isoformat(),
+                    "source_url": entry.get("link", ""),
+                    "source_name": source_name,
+                    "rss_summary": summary,
+                    "matched_pillar": pillar,
+                    "published_time": published_time,
+                }
+            )
+
+    collected_items.sort(
+        key=lambda item: item["published_time"], reverse=True
+    )
+
+    selected_items = collected_items[:10]
+    for candidate_id, item in enumerate(selected_items):
+        item["candidate_id"] = candidate_id
+
+    return selected_items
 
 
 st.set_page_config(
     page_title="Anky Signal Scout",
     page_icon="📡",
-    layout="wide"
+    layout="wide",
 )
 
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -112,7 +104,7 @@ st.sidebar.header("Search settings")
 
 time_window = st.sidebar.selectbox(
     "How recent should the topics be?",
-    ["Last 24 hours", "Last 7 days", "Last 30 days"]
+    ["Last 24 hours", "Last 7 days", "Last 30 days"],
 )
 
 content_pillars = st.sidebar.multiselect(
@@ -124,13 +116,13 @@ content_pillars = st.sidebar.multiselect(
         "Enterprise Transformation",
         "Cloud & Infrastructure",
         "Cybersecurity",
-        "E-commerce"
+        "E-commerce",
     ],
     default=[
         "Enterprise AI",
         "AI Agents",
-        "Enterprise Transformation"
-    ]
+        "Enterprise Transformation",
+    ],
 )
 
 st.subheader("Your search")
@@ -140,247 +132,154 @@ st.write(f"**Content pillars:** {', '.join(content_pillars)}")
 if st.button("Find content opportunities", type="primary"):
     if not content_pillars:
         st.warning("Please select at least one content pillar.")
-
     else:
-        with st.spinner(
-            "Searching and validating recent developments..."
-        ):
+        with st.spinner("Collecting recent news and analysing signals..."):
             try:
                 window_hours = {
                     "Last 24 hours": 24,
                     "Last 7 days": 168,
-                    "Last 30 days": 720
+                    "Last 30 days": 720,
                 }[time_window]
 
                 current_time = datetime.now(timezone.utc)
-                cutoff_time = current_time - timedelta(
-                    hours=window_hours
+                cutoff_time = current_time - timedelta(hours=window_hours)
+
+                rss_items = fetch_recent_rss_items(
+                    content_pillars,
+                    time_window,
+                    cutoff_time,
+                    current_time,
                 )
 
-                discovery_prompt = f"""
-Search the web for up to ten recent technology developments.
-
-Focus on:
-{", ".join(content_pillars)}
-
-Current UTC time:
-{current_time.isoformat()}
-
-Look primarily for developments published after:
-{cutoff_time.isoformat()}
-
-For every candidate, provide:
-
-- Topic
-- Exact publication date and time with timezone
-- Direct source URL
-- Factual summary
-- Why it matters for enterprises
-- A specific overlooked tension
-- A critical LinkedIn angle for Anita
-
-Important:
-
-- Preserve the publication date shown by the source.
-- Never change an old date to make a candidate appear recent.
-- If the exact date or timezone is unavailable, say it is unknown.
-- Prefer official and authoritative sources.
-- Do not claim LinkedIn traction.
-- Do not use generic promotional language.
-"""
-
-                research_response = client.responses.create(
-                    model="gpt-4.1-mini",
-                    tools=[
-                        {
-                            "type": "web_search",
-                            "search_context_size": "low"
-                        }
-                    ],
-                    tool_choice="required",
-                    include=[
-                        "web_search_call.action.sources"
-                    ],
-                    input=discovery_prompt
-                )
-
-                consulted_sources = []
-
-                for item in research_response.output:
-                    if (
-                        getattr(item, "type", None)
-                        == "web_search_call"
-                    ):
-                        action = getattr(item, "action", None)
-                        sources = (
-                            getattr(action, "sources", [])
-                            or []
-                        )
-
-                        for source in sources:
-                            url = getattr(source, "url", None)
-
-                            if (
-                                url
-                                and url not in consulted_sources
-                            ):
-                                consulted_sources.append(url)
-
-                extraction_response = client.responses.parse(
-                    model="gpt-5-mini",
-                    input=[
-                        {
-                            "role": "system",
-                            "content": """
-Extract every candidate from the research into the required
-structure.
-
-Rules:
-
-- Copy publication dates exactly from the research.
-- Convert a verified date and time to ISO 8601 format.
-- Include the timezone.
-- If the date, time or timezone is missing, use an empty string.
-- Never estimate or invent a publication time.
-- Preserve each source URL.
-"""
-                        },
-                        {
-                            "role": "user",
-                            "content": research_response.output_text
-                        }
-                    ],
-                    text_format=CandidateList
-                )
-
-                candidates = (
-                    extraction_response.output_parsed.candidates
-                )
-
-                valid_candidates = []
-                rejected_candidates = []
-
-                for candidate in candidates:
-                    publication_time = (
-                        extract_publication_datetime_from_url(
-                            candidate.source_url
-                        )
-                    )
-
-                    if publication_time is not None:
-                        candidate.publication_datetime = (
-                            publication_time.isoformat()
-                        )
-                    else:
-                        candidate.publication_datetime = ""
-
-                    if (
-                        publication_time is not None
-                        and cutoff_time
-                        <= publication_time
-                        <= current_time
-                    ):
-                        valid_candidates.append(candidate)
-                    else:
-                        rejected_candidates.append(candidate)
-
-                if not valid_candidates:
+                if not rss_items:
                     st.warning(
-                        "No verifiably recent developments were "
-                        "found within this time window."
+                        "No RSS items with valid timestamps were found "
+                        "within this time window."
                     )
-
                 else:
-                    opportunity_word = (
-                        "opportunity"
-                        if len(valid_candidates) == 1
-                        else "opportunities"
+                    model_input = []
+                    for item in rss_items:
+                        model_input.append(
+                            {
+                                "candidate_id": item["candidate_id"],
+                                "title": item["title"],
+                                "publication_datetime": item[
+                                    "publication_datetime"
+                                ],
+                                "source_name": item["source_name"],
+                                "rss_summary": item["rss_summary"],
+                                "matched_pillar": item["matched_pillar"],
+                            }
+                        )
+
+                    analysis_response = client.responses.parse(
+                        model="gpt-5-mini",
+                        input=[
+                            {
+                                "role": "system",
+                                "content": """
+You are the analysis stage of Anky Signal Scout.
+
+Select up to five of the strongest supplied candidates for a
+critical LinkedIn post or article. Use only the supplied facts.
+
+For each selected candidate:
+- Preserve its candidate_id exactly.
+- Explain why it matters to enterprises.
+- Identify a specific overlooked tension or double standard.
+- Suggest a sharp LinkedIn angle for Ankita.
+- Avoid generic promotional language.
+- Do not claim that something is trending on LinkedIn.
+""",
+                            },
+                            {
+                                "role": "user",
+                                "content": json.dumps(
+                                    model_input, ensure_ascii=False
+                                ),
+                            },
+                        ],
+                        text_format=OpportunityList,
                     )
 
-                    st.success(
-                        f"{len(valid_candidates)} valid content "
-                        f"{opportunity_word} found."
+                    parsed_opportunities = (
+                        analysis_response.output_parsed.opportunities
                     )
+                    items_by_id = {
+                        item["candidate_id"]: item for item in rss_items
+                    }
 
-                    st.subheader("Content opportunities")
+                    valid_opportunities = []
+                    used_ids = set()
+                    for opportunity in parsed_opportunities:
+                        if (
+                            opportunity.candidate_id in items_by_id
+                            and opportunity.candidate_id not in used_ids
+                        ):
+                            used_ids.add(opportunity.candidate_id)
+                            valid_opportunities.append(opportunity)
 
-                    for candidate in valid_candidates:
-                        st.markdown("---")
-                        st.subheader(candidate.topic)
-
-                        st.caption(
-                            "Published: "
-                            f"{candidate.publication_datetime}"
+                    if not valid_opportunities:
+                        st.warning(
+                            "Recent RSS items were found, but no content "
+                            "opportunities were selected."
                         )
-
-                        st.markdown("**What happened**")
-                        st.write(candidate.summary)
-
-                        st.markdown("**Why it matters**")
-                        st.write(candidate.why_it_matters)
-
-                        st.markdown("**Overlooked tension**")
-                        st.write(candidate.overlooked_tension)
-
-                        st.markdown(
-                            "**Possible LinkedIn angle**"
-                        )
-                        st.write(candidate.linkedin_angle)
-
-                        st.markdown(
-                            f"**Source:** "
-                            f"[{candidate.source_url}]"
-                            f"({candidate.source_url})"
-                        )
-
-                with st.expander("Websites consulted"):
-                    if consulted_sources:
-                        for url in consulted_sources:
-                            st.markdown(f"- {url}")
                     else:
-                        st.write(
-                            "No source metadata was returned."
+                        st.success(
+                            f"{len(valid_opportunities)} recent content "
+                            "opportunities found."
                         )
+                        st.subheader("Content opportunities")
+
+                        for opportunity in valid_opportunities:
+                            source_item = items_by_id[
+                                opportunity.candidate_id
+                            ]
+
+                            st.markdown("---")
+                            st.subheader(source_item["title"])
+                            st.caption(
+                                "Published: "
+                                f"{source_item['publication_datetime']} | "
+                                f"Source: {source_item['source_name']}"
+                            )
+
+                            st.markdown("**What happened**")
+                            st.write(opportunity.summary)
+
+                            st.markdown("**Why it matters**")
+                            st.write(opportunity.why_it_matters)
+
+                            st.markdown("**Overlooked tension**")
+                            st.write(opportunity.overlooked_tension)
+
+                            st.markdown("**Possible LinkedIn angle**")
+                            st.write(opportunity.linkedin_angle)
+
+                            st.markdown(
+                                f"**Source:** [{source_item['source_name']}]"
+                                f"({source_item['source_url']})"
+                            )
 
                 with st.expander("Validation details"):
                     st.write(
-                        "Candidates discovered: "
-                        f"{len(candidates)}"
+                        f"RSS items accepted by Python: {len(rss_items)}"
                     )
                     st.write(
-                        "Candidates accepted: "
-                        f"{len(valid_candidates)}"
+                        "Window start: "
+                        f"{cutoff_time.isoformat()}"
                     )
                     st.write(
-                        "Candidates rejected: "
-                        f"{len(rejected_candidates)}"
+                        "Window end: "
+                        f"{current_time.isoformat()}"
                     )
 
-                    if rejected_candidates:
-                        st.write(
-                            "Rejected because the publication "
-                            "date was missing, invalid, in the "
-                            "future or outside the selected time "
-                            "window:"
+                    for item in rss_items:
+                        st.markdown(
+                            f"- [{item['title']}]({item['source_url']}) "
+                            f"— {item['publication_datetime']} "
+                            f"— {item['source_name']}"
                         )
-
-                        for candidate in rejected_candidates:
-                            displayed_date = (
-                                candidate.publication_datetime
-                                or "Unverified"
-                            )
-
-                            if candidate.source_url:
-                                st.markdown(
-                                    f"- [{candidate.topic}]"
-                                    f"({candidate.source_url}) "
-                                    f"— {displayed_date}"
-                                )
-                            else:
-                                st.write(
-                                    f"- {candidate.topic} "
-                                    f"— {displayed_date}"
-                                )
 
             except Exception as error:
                 st.error(f"Search failed: {error}")
